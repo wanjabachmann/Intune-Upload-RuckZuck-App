@@ -14,8 +14,7 @@ Adds a file name extension to a supplied name.
 
 .EXAMPLE
 
-PS> extension -name "File"
-File.txt
+PS> .\intune-Upload-RuckZuck-App
 
 .LINK
 https://tech.wanjabachmann.ch/
@@ -27,6 +26,8 @@ $installFileName = "install"
 $uninstallFileName = "uninstall"
 $PSInstallFileExtension = ".ps1"
 $getrzrestapiurl = Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl"
+$Detectiongetrzrestapiurl = '$getrzrestapiurl = Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl"'
+
 $urlrz = "https://github.com/rzander/ruckzuck/releases/download/1.7.0.5/"
 $applicationrz  = "RZUpdate.exe"
 $applicationurlrz = $urlrz + $applicationrz
@@ -41,6 +42,9 @@ $urlw32apptool = "https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool
 $applicationw32apptool  = "IntuneWinAppUtil.exe"
 $IntuneWinAppUtil = "$PSScriptRoot\$applicationw32apptool"
 
+##########################################################################################
+# Functions
+##########################################################################################
 # Create Application Package
 function create-package {
     
@@ -50,37 +54,19 @@ function create-package {
     &$IntuneWinAppUtil -c "$PSScriptRoot\$returnedSoftware" -s "$applicationrz" -o "$PSScriptRoot\$uploadFolder" -q
 }
 
-
+##########################################################################################
 # Searching for the Software form RuckZuck Tools
 function get-Software {
-    # Get Software from RuckZuck
-    $getSoftwareFromRuckZuck = Read-Host -Prompt "Input Software Name to upload "
+    $getReturnedRuckZuckSoftware = @()
     $returnRuckZuckSoftware = Invoke-RestMethod -Uri "$getrzrestapiurl/rest/v2/getcatalog"
     $getReturnedRuckZuckSoftware = $returnRuckZuckSoftware | Select-Object Productname, ShortName, Downloads `
-    | Sort-Object ShortName | Where-Object {$_.ShortName -match "$getSoftwareFromRuckZuck"}
-
-    # Add Elements to Hash Table
-    $menu = $null
-    $menu = @{}
-    if ($getReturnedRuckZuckSoftware.count -eq $null){
-        $j = 1
-    }else{
-        $j = $getReturnedRuckZuckSoftware.count
-    }
-
-    for ($i=1;$i -le $j; $i++) {
-        Write-Host "$i. $($getReturnedRuckZuckSoftware[$i-1].Shortname)"
-        $menu.Add($i,($getReturnedRuckZuckSoftware[$i-1].Shortname))
-    }
-
-    [int]$ans = Read-Host "`n Enter selection"
-    $selection = $menu.Item($ans)
-
-    Write-Host "`n Selected:" $selection
+    | Sort-Object ShortName | Out-GridView -Title "Select software to upload" -PassThru
+    $selection = $getReturnedRuckZuckSoftware.Shortname
 
     return $selection
 }
 
+##########################################################################################
 
 function get-SoftwareDetails {
     # Get Software from RuckZuck
@@ -91,15 +77,28 @@ function get-SoftwareDetails {
     return $getReturnedRuckZuckSoftware
 }
 
+##########################################################################################
 
+function Create_Detection_File {
+    [array]$DetectionContent = $null
+    $DetectionContent = '$returnedSoftware =' + "`"$returnedSoftware`""
+    $DetectionContent += $Detectiongetrzrestapiurl 
+    $DetectionContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri ' + '"$getrzrestapiurl/rest/v2/getsoftwares?shortname=$returnedSoftware"'
+    $DetectionContent += '$getReturnedRuckZuckSoftware = $returnRuckZuckSoftware.PSDetection'
+    $DetectionContent += 'if((Invoke-Expression $getReturnedRuckZuckSoftware) -eq $true){' + "write-host `"App installed`" `n exit 0}else{write-host `"App not installed`" `n exit 1}"
+
+    $DetectionFileContent = $DetectionContent | Out-String
+    # test only
+    $DetectionFileContent
+    New-Item -Path "$PSScriptRoot\$uploadfolder\$detectionFileName$PSInstallFileExtension" -ItemType File -Value $DetectionFileContent -Force
+}
+
+
+##########################################################################################
 ### Run W32_Applicatoin_Add.ps1 ###
 function W32_Application_Add {
-    # Create Detection PowerShell File
-    $psdetection = $RZSoftwareWithDetails.PSDetection
-    $detectionString = '[bool]$psdetectionout =' + "$psdetection `n" + 'if($psdetectionout -eq $true){' + "write-host `"Dynamic Version`" `n exit 0}else{exit 1}"
-
-    New-Item -Path "$PSScriptRoot\$uploadfolder\$detectionFileName$PSInstallFileExtension" `
-    -ItemType File -Value $detectionString -Force
+    
+    Create_Detection_File
 
     $installcommand = "powershell.exe -executionpolicy Bypass -file `".\$installFileName$PSInstallFileExtension`""
     $uninstallcommand = "powershell.exe -executionpolicy bypass -file `".\$uninstallFileName$PSInstallFileExtension`""
@@ -109,6 +108,10 @@ function W32_Application_Add {
     $SourceFile = (Get-ChildItem -Path $PSScriptRoot\$uploadfolder\ -Filter *.intunewin -Recurse).FullName
 
     $Publisher = $RZSoftwareWithDetails.Manufacturer
+
+    if ($Publisher -eq $null){
+        $Publisher = "not set"
+    }
 
     if ($RZSoftwareWithDetails.Architecture -eq "x64"){
         $ifrunAs32Bit = $false
@@ -133,6 +136,7 @@ function W32_Application_Add {
     -returnCodes $ReturnCodes -installCmdLine $installcommand -uninstallCmdLine $uninstallcommand
 }
 
+##########################################################################################
 # Change content of Win32_Application_Add.ps1 Script
 function content-change {
     $PSWin32_Application_Add = "Win32_Application_Add.ps1"
@@ -147,10 +151,11 @@ function content-change {
     }
     $newcontent | set-content -Path .\$PSWin32_Application_Add
 }
+##########################################################################################
 
-################
-# Call objects #
-################
+##########################################################################################
+# Call objects 
+##########################################################################################
 
 # Download W32 App tool
 Invoke-WebRequest -Uri $urlw32apptool -OutFile $IntuneWinAppUtil
@@ -159,36 +164,41 @@ Invoke-WebRequest -Uri $urlw32apptool -OutFile $IntuneWinAppUtil
 Invoke-WebRequest -Uri $Win32_Application_Add -OutFile "$PSScriptRoot\original-$PSWin32_Application_Add"
 
 # Name of the selected Software
-$returnedSoftware = get-Software
-$uploadFolder = "$returnedSoftware-upload"
+$Software = get-Software
 
-# Create Down-/Upload Folder
-New-Item -ItemType Directory -Path "$PSScriptRoot\$returnedSoftware" -Force
-New-Item -ItemType Directory -Path "$PSScriptRoot\$uploadFolder" -Force
+# Create Files and Upload Software via Graph Rest API
+foreach ($returnedSoftware in  $Software){
+    $uploadFolder = "$returnedSoftware-upload"
 
-# Create Install PowerShell File
-New-Item -Path "$PSScriptRoot\$returnedSoftware\$installFileName$PSInstallFileExtension" `
--ItemType File -Value ".\$applicationrz `"$returnedSoftware`"" -Force
+    # Create Down-/Upload Folder
+    New-Item -ItemType Directory -Path "$PSScriptRoot\$returnedSoftware" -Force
+    New-Item -ItemType Directory -Path "$PSScriptRoot\$uploadFolder" -Force
 
-# Get Software Details
-$RZSoftwareWithDetails = get-SoftwareDetails
+    # Create Install PowerShell File
+    New-Item -Path "$PSScriptRoot\$returnedSoftware\$installFileName$PSInstallFileExtension" `
+    -ItemType File -Value ".\$applicationrz `"$returnedSoftware`"" -Force
 
-# Create Uninstall PowerShell File
-# $uninstallString = "Start-Transcript -Path `"C:\temp\logent.log`";" + $RZSoftwareWithDetails.PSUninstall + ";stop-transcript"
-$uninstallString = $RZSoftwareWithDetails.PSUninstall
-New-Item -Path "$PSScriptRoot\$returnedSoftware\$uninstallFileName$PSInstallFileExtension" `
--ItemType File -Value "$uninstallString" -Force
+    # Get Software Details
+    $RZSoftwareWithDetails = get-SoftwareDetails
 
-# Create intunewin
-create-package
+    # Create Uninstall PowerShell File
+    # $uninstallString = "Start-Transcript -Path `"C:\temp\logent.log`";" + $RZSoftwareWithDetails.PSUninstall + ";stop-transcript"
+    $uninstallString = $RZSoftwareWithDetails.PSUninstall
+    New-Item -Path "$PSScriptRoot\$returnedSoftware\$uninstallFileName$PSInstallFileExtension" `
+    -ItemType File -Value "$uninstallString" -Force
 
-# Change Content of Win32_Application_Add.ps1
-content-change
+    # Create intunewin
+    create-package
 
-# Upload Software via Graph API
-W32_Application_Add
+    # Change Content of Win32_Application_Add.ps1
+    content-change
 
-##### Report App ######
+    # Upload Software via Graph API
+    W32_Application_Add
+}
+
+
+##### Report App Selected Apps######
 Write-host "-----------------------------------------------------------------"
-"Uploaded Software: " + $returnedSoftware
+"Uploaded Software: " + $Software
 Write-host "-----------------------------------------------------------------"
