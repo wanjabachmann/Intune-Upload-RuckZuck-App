@@ -14,7 +14,7 @@ Adds a file name extension to a supplied name.
 
 .EXAMPLE
 
-PS> .\intune-Upload-RuckZuck-App
+PS> .\
 
 .LINK
 https://tech.wanjabachmann.ch/
@@ -26,7 +26,7 @@ $installFileName = "install"
 $uninstallFileName = "uninstall"
 $PSInstallFileExtension = ".ps1"
 $getrzrestapiurl = Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl"
-$Detectiongetrzrestapiurl = '$getrzrestapiurl = Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl"'
+$rzrestapiurlstring = '$getrzrestapiurl = Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl"'
 
 $urlrz = "https://github.com/rzander/ruckzuck/releases/download/1.7.0.5/"
 $applicationrz  = "RZUpdate.exe"
@@ -82,7 +82,7 @@ function get-SoftwareDetails {
 function Create_Detection_File {
     [array]$DetectionContent = $null
     $DetectionContent = '$returnedSoftware =' + "`"$returnedSoftware`""
-    $DetectionContent += $Detectiongetrzrestapiurl 
+    $DetectionContent += $rzrestapiurlstring 
     $DetectionContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri ' + '"$getrzrestapiurl/rest/v2/getsoftwares?shortname=$returnedSoftware"'
     $DetectionContent += '$getReturnedRuckZuckSoftware = $returnRuckZuckSoftware.PSDetection'
     $DetectionContent += 'if((Invoke-Expression $getReturnedRuckZuckSoftware) -eq $true){' + "write-host `"App installed`" `n exit 0}else{write-host `"App not installed`" `n exit 1}"
@@ -93,16 +93,37 @@ function Create_Detection_File {
     New-Item -Path "$PSScriptRoot\$uploadfolder\$detectionFileName$PSInstallFileExtension" -ItemType File -Value $DetectionFileContent -Force
 }
 
+function Create_Uninstall_Commmand {
+    [array]$UninstallContent = $null
+    $UninstallContentCommand = $null
+
+    $UninstallContent = 'powershell.exe -executionpolicy Bypass -command {'
+    $UninstallContent += '$returnedSoftware =' + "`"$returnedSoftware`"" + ";"
+    $UninstallContent += $rzrestapiurlstring + ";"
+    $UninstallContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri ' + '"$getrzrestapiurl/rest/v2/getsoftwares?shortname=$returnedSoftware"' + ";"
+    $UninstallContent += 'Invoke-Expression $returnRuckZuckSoftware.PSUninstall' + '}'
+    
+    $UninstallContentCommand = $UninstallContent | Out-String
+        
+    return $UninstallContentCommand
+}
 
 ##########################################################################################
 ### Run W32_Applicatoin_Add.ps1 ###
 function W32_Application_Add {
     
     Create_Detection_File
-
+    <#
     $installcommand = "powershell.exe -executionpolicy Bypass -file `".\$installFileName$PSInstallFileExtension`""
     $uninstallcommand = "powershell.exe -executionpolicy bypass -file `".\$uninstallFileName$PSInstallFileExtension`""
+    #>
+    #$uninstallString = $RZSoftwareWithDetails.PSUninstall
+    [string]$uninstallcommand = $null
+    [string]$installcommand = $null
 
+    $installcommand = ".\$applicationrz `"$returnedSoftware`""
+    $uninstallcommand = Create_Uninstall_Commmand
+    
     . "$PSScriptRoot\$PSWin32_Application_Add"
 
     $SourceFile = (Get-ChildItem -Path $PSScriptRoot\$uploadfolder\ -Filter *.intunewin -Recurse).FullName
@@ -131,7 +152,7 @@ function W32_Application_Add {
     #$ReturnCodes += New-ReturnCode -returnCode 145 -type hardReboot
 
     # Win32 Application Upload
-    Upload-Win32Lob -displayName "$returnedSoftware RZ" -SourceFile $SourceFile -publisher $Publisher `
+    Upload-Win32Lob -displayName "$returnedSoftware RZ-test" -SourceFile $SourceFile -publisher $Publisher `
     -description $RZSoftwareWithDetails.Description -detectionRules $DetectionRule `
     -returnCodes $ReturnCodes -installCmdLine $installcommand -uninstallCmdLine $uninstallcommand
 }
@@ -173,19 +194,9 @@ foreach ($returnedSoftware in  $Software){
     # Create Down-/Upload Folder
     New-Item -ItemType Directory -Path "$PSScriptRoot\$returnedSoftware" -Force
     New-Item -ItemType Directory -Path "$PSScriptRoot\$uploadFolder" -Force
-
-    # Create Install PowerShell File
-    New-Item -Path "$PSScriptRoot\$returnedSoftware\$installFileName$PSInstallFileExtension" `
-    -ItemType File -Value ".\$applicationrz `"$returnedSoftware`"" -Force
-
+    
     # Get Software Details
     $RZSoftwareWithDetails = get-SoftwareDetails
-
-    # Create Uninstall PowerShell File
-    # $uninstallString = "Start-Transcript -Path `"C:\temp\logent.log`";" + $RZSoftwareWithDetails.PSUninstall + ";stop-transcript"
-    $uninstallString = $RZSoftwareWithDetails.PSUninstall
-    New-Item -Path "$PSScriptRoot\$returnedSoftware\$uninstallFileName$PSInstallFileExtension" `
-    -ItemType File -Value "$uninstallString" -Force
 
     # Create intunewin
     create-package
