@@ -152,7 +152,7 @@ function W32_Application_Add {
     #$ReturnCodes += New-ReturnCode -returnCode 145 -type hardReboot
 
     # Win32 Application Upload
-    Upload-Win32Lob -displayName "$returnedSoftware RZ-test" -SourceFile $SourceFile -publisher $Publisher `
+    Upload-Win32Lob -displayName "$returnedSoftware RZ" -SourceFile $SourceFile -publisher $Publisher `
     -description $RZSoftwareWithDetails.Description -detectionRules $DetectionRule `
     -returnCodes $ReturnCodes -installCmdLine $installcommand -uninstallCmdLine $uninstallcommand
 }
