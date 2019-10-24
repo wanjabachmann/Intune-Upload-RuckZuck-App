@@ -14,7 +14,7 @@ Adds a file name extension to a supplied name.
 
 .EXAMPLE
 
-PS> .\
+PS> .\Upload-RuckZuck-apps.ps1
 
 .LINK
 https://tech.wanjabachmann.ch/
@@ -28,7 +28,7 @@ $PSWin32_Application_Add = "Win32_Application_Add.ps1"
 $urlw32apptool = "https://github.com/microsoft/Microsoft-Win32-Content-Prep-Tool/blob/master/IntuneWinAppUtil.exe?raw=true"
 $applicationw32apptool  = "IntuneWinAppUtil.exe"
 $IntuneWinAppUtil = "$PSScriptRoot\$applicationw32apptool"
-
+$RuckZuckRestAPIURL = "https://ruckzuck.tools/rest/v2/geturl"
 ##########################################################################################
 # Functions
 ##########################################################################################
@@ -37,9 +37,8 @@ function Get-RuckZuckUrl {
     param ()
 
     process{
-
-            return (Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl")
-        }
+        return (Invoke-RestMethod -Uri "$RuckZuckRestAPIURL")
+    }
 }
 
 # Create Application Package
@@ -81,7 +80,7 @@ function Get-Software {
         $getReturnedRuckZuckSoftware = $returnRuckZuckSoftware | Select-Object Productname, ShortName, Downloads | Sort-Object ShortName | Out-GridView -Title "Select software to upload" -PassThru
         
         return $getReturnedRuckZuckSoftware.Shortname
-        }
+    }
 }
 
 ##########################################################################################
@@ -106,15 +105,19 @@ function Get-SoftwareDetails {
 
 function New-DetectionFile {
     [CmdletBinding()]
-    param ()
+    param (
+        [Parameter(Mandatory=$true)]
+        [String]$ApplicationShortname
+    )
     process{
 
         $DetectionContent = @()
-        $DetectionContent = '$returnedSoftware =' + "`"$returnedSoftware`""
-        $DetectionContent += '$getrzrestapiurl = Invoke-RestMethod -Uri "https://ruckzuck.tools/rest/v2/geturl"'
-        $DetectionContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri ' + '"$(Get-RuckZuckUrl)/rest/v2/getsoftwares?shortname=$returnedSoftware"'
-        $DetectionContent += '$getReturnedRuckZuckSoftware = $returnRuckZuckSoftware.PSDetection'
-        $DetectionContent += 'if((Invoke-Expression $getReturnedRuckZuckSoftware) -eq $true){' + "write-host `"App installed`" `n exit 0}else{write-host `"App not installed`" `n exit 1}"
+        $DetectionContent =  '$RuckZuckRestAPIURL ='  + "`"$RuckZuckRestAPIURL`"" + ";"
+        $DetectionContent += '$returnedSoftware =' + "`"$ApplicationShortname`"" + ";"
+        $DetectionContent += '$getrzrestapiurl = Invoke-RestMethod -Uri "$RuckZuckRestAPIURL"' + ";"
+        $DetectionContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri "$($getrzrestapiurl)/rest/v2/getsoftwares?shortname=$returnedSoftware"' + ";"
+        $DetectionContent += '$getReturnedRuckZuckSoftware = $returnRuckZuckSoftware.PSDetection' + ";"
+        $DetectionContent += 'if((Invoke-Expression $getReturnedRuckZuckSoftware) -eq $true){' + "write-host `"App installed`"; exit 0}else{write-host `"App not installed`"; exit 1}"
     
         $DetectionFileContent = $DetectionContent | Out-String
         
@@ -124,14 +127,17 @@ function New-DetectionFile {
 
 function New-UninstallCommand {
     [CmdletBinding()]
-    param ()
+    param (
+        [Parameter(Mandatory=$true)]
+        [String]$ApplicationShortname
+    )
     process{
         $UninstallContent = @()
-
         $UninstallContent = 'powershell.exe -executionpolicy Bypass -command {'
-        $UninstallContent += '$returnedSoftware =' + "`"$returnedSoftware`"" + ";"
-        $UninstallContent += $rzrestapiurlstring + ";"
-        $UninstallContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri ' + '"$getrzrestapiurl/rest/v2/getsoftwares?shortname=$returnedSoftware"' + ";"
+        $UninstallContent +=  '$RuckZuckRestAPIURL ='  + "`"$RuckZuckRestAPIURL`"" + ";"
+        $UninstallContent += '$returnedSoftware =' + "`"$ApplicationShortname`"" + ";"
+        $UninstallContent += '$getrzrestapiurl = Invoke-RestMethod -Uri "$RuckZuckRestAPIURL"' + ";"
+        $UninstallContent += '$returnRuckZuckSoftware = Invoke-RestMethod -Uri "$($getrzrestapiurl)/rest/v2/getsoftwares?shortname=$returnedSoftware"' + ";"
         $UninstallContent += 'Invoke-Expression $returnRuckZuckSoftware.PSUninstall' + '}'
         
         return $($UninstallContent | Out-String)
@@ -145,6 +151,8 @@ function Add-Win32Application {
     param (
         [Parameter(Mandatory=$true)]
         [String]$ApplicationShortname,
+        [Parameter(Mandatory=$true)]
+        [String]$UninstallCommand,
         [Parameter(Mandatory=$false)]
         [String]$RzUpdate= "RzUpdate.exe"
     )
@@ -158,13 +166,11 @@ function Add-Win32Application {
         # Get Software Details
         $RZSoftwareWithDetails = Get-SoftwareDetails -ApplicationShortname $ApplicationShortname
 
-        New-DetectionFile
-   
-        [string]$uninstallcommand = $null
-        [string]$installcommand = $null
+        #[string]$uninstallcommand = $null
+        #$uninstallcommand = New-UninstallCommand
 
-        $installcommand = ".\$RzUpdate `"$ApplicationShortname`""
-        $uninstallcommand = New-UninstallCommand
+        [string]$installcommand = $null
+        $InstallCommand = ".\$RzUpdate `"$ApplicationShortname`""
 
         #Import graph script
         Import-Module -Name "$PSScriptRoot\Win32_Application_Add.psm1" -Verbose -ErrorAction Stop
@@ -195,9 +201,9 @@ function Add-Win32Application {
         #$ReturnCodes += New-ReturnCode -returnCode 145 -type hardReboot
 
         # Win32 Application Upload
-        Upload-Win32Lob -displayName "$returnedSoftware RZ" -SourceFile $SourceFile -publisher $Publisher `
+        Upload-Win32Lob -displayName "$ApplicationShortname RZ" -SourceFile $SourceFile -publisher $Publisher `
         -description $RZSoftwareWithDetails.Description -detectionRules $DetectionRule `
-        -returnCodes $ReturnCodes -installCmdLine $installcommand -uninstallCmdLine $uninstallcommand
+        -returnCodes $ReturnCodes -installCmdLine $installcommand -uninstallCmdLine $UninstallCommand
     }
 }
 
@@ -231,7 +237,7 @@ Invoke-WebRequest -Uri $urlw32apptool -OutFile $IntuneWinAppUtil
 Write-Output "Downloading Microsoft Graph script..."
 Invoke-WebRequest -Uri $Win32_Application_Add -OutFile "$PSScriptRoot\original-$PSWin32_Application_Add"
 
-# Name of the selected Software
+# Shortname of the selected Software
 $Software = Get-Software
 Write-Output "Selected software: '$Software'"
 
@@ -249,9 +255,15 @@ foreach ($currentSoftware in  $Software){
     # Create intunewin
     New-IntuneWin32Package -ApplicationShortname $currentSoftware
 
+    # Create Uninstall Command
+    $UninstallFilePar = New-UninstallCommand -ApplicationShortname $currentSoftware
+
+    # Create Detection File
+    New-DetectionFile -ApplicationShortname $currentSoftware
+   
     # Change Content of Win32_Application_Add.ps1
     Update-GraphScript
 
     # Upload Software via Graph API
-    Add-Win32Application -ApplicationShortname $currentSoftware
+    Add-Win32Application -ApplicationShortname $currentSoftware -UninstallCommand $UninstallFilePar
 }
